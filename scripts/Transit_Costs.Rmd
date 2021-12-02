@@ -1,0 +1,121 @@
+---
+title: "TidyTuesday2021-01-05 Transit Cost Project"
+author: "LeiHe"
+date: "12/2/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+### Transit Cost Project
+----------
+The data this week comes from Transit Costs Project.
+
+Why do transit-infrastructure projects in New York cost 20 times more on a per kilometer basis than in Seoul? We investigate this question across hundreds of transit projects from around the world. We have created a database that spans more than 50 countries and totals more than 11,000 km of urban rail built since the late 1990s. We will also examine this question in greater detail by carrying out six in-depth case studies that take a closer look at unique considerations and variables that aren’t easily quantified, like project management, governance, and site conditions.
+
+The goal of this work is to figure out how to deliver more high-capacity transit projects for a fraction of the cost in countries like the United States. Additionally, we hope that our site will be a useful resource for elected officials, planners, researchers, journalists, advocates, and others interested in contextualizing transit-infrastructure costs and fighting for better projects.
+
+#### Get the data here
+```{r data}
+# transit_cost <- tidytuesdayR::tt_load('2021-01-05')
+# transit_cost <- transit_cost$transit_cost
+transit_cost <- readRDS("data/transit_cost_20210105.rds")
+transit_cost %>% glimpse()
+```
+
+```{r}
+library(tidyverse)
+library(ggbump)
+library(ggtext)
+library(systemfonts)
+library(pdftools)
+```
+
+
+```{r prep-data}
+df_transit_ranking <- 
+  transit_cost %>% 
+  filter(!is.na(stations), stations > 0, real_cost > 0, end_year < 2021) %>% 
+  mutate(
+    cost_per_station = cost/stations,
+    country = case_when(country == "UK" ~ "GB",
+                        TRUE ~ country)
+  ) %>% 
+  group_by(country) %>% 
+  filter(n() > 1) %>% 
+  dplyr::summarize(across(c(length, stations, real_cost, cost_km_millions, cost_per_station),
+                   ~mean(.x, na.rm = TRUE)))
+  
+codelist <- countrycode::codelist %>% 
+  dplyr::select(country.name.en, ecb)
+
+# head(codelist)
+df_transit_ranking <- 
+df_transit_ranking %>% 
+  left_join(codelist, by = c("country" = "ecb")) %>% 
+  select(country.name.en, everything()) %>% 
+  mutate(
+    rank_km = rank(cost_km_millions, ties.method = "random"),
+    rank_st = rank(cost_per_station, ties.method = "random"),
+    start_km = -40,
+    start_st = 40,
+    end_km = start_km - cost_km_millions / 14,
+    end_st = start_st + cost_per_station / 14
+  ) 
+df_transit_ranking
+
+x <- c(seq(-150, -40, by = 10), seq(40, 150, by = 10))
+y <- 1:(n_distinct(df_transit_ranking$rank_km)  + 1)
+lines <- crossing(x, y)
+
+head(lines)
+```
+
+```{r}
+
+ggplot(df_transit_ranking) +
+  geom_sigmoid(
+    aes(x = -25, xend = 25,
+        y = rank_km, yend = rank_st,
+        group = country.name.en,
+        color = rank_km,
+        color = after_scale(colorspace::lighten(color, .4))),
+    alpha = .45, smooth = 8, size = 1.2
+  ) +
+  # start-end points connections
+  geom_point(
+    aes(x = -25, y = rank_km,
+        color = rank_km,
+        color = after_scale(colorspace::desaturate(colorspace::lighten(color, .2), .2))),
+    size = 4, shape = "|"
+  ) +
+  geom_point(
+    aes(x = 25, y = rank_st,
+        color = rank_km,
+        color = after_scale(colorspace::desaturate(colorspace::lighten(color, .2), .2))),
+    size = 4, 
+    shape = "|"
+  ) +
+  # rounded bar plots
+  geom_segment(
+    ## make bars a bit shorter because of rounded lineends
+    aes(x = start_km - 1.1, xend = end_km + 1.1,
+        y = rank_km, yend = rank_km,
+        color = rank_km,
+        color = after_scale(colorspace::lighten(color, .2))),
+    size = 4,
+    lineend = "round"
+  ) +
+  geom_segment(
+    aes(x = start_st + 1.1, xend = end_st - 1.1, 
+        y = rank_st, yend = rank_st, 
+        color = rank_km,
+        color = after_scale(colorspace::lighten(color, .2))), 
+    size = 4, 
+    lineend = "round"
+  ) 
+```
+
